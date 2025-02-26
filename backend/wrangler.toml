@@ -1,0 +1,13 @@
+name = "cloudflare-worker"
+type = "javascript"
+account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+workers_dev = true
+
+[vars]
+CLOUDINARY_CLOUD_NAME = "your-cloudinary-name"
+CLOUDINARY_API_KEY = "your-api-key"
+CLOUDINARY_API_SECRET = "your-api-secret"
+
+[[kv_namespaces]]
+binding = "FLAG_CACHE"
+id = "your-kv-namespace-id"
