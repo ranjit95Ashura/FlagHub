@@ -1,9 +1,9 @@
 export interface CountryFlagProps {
-  countryName: string; // Required: Country name (e.g., 'United States')
-  flagsBaseUrl?: string; // Custom URL to fetch flags from
-  width?: number | string; // Width of the flag image
-  height?: number | string; // Height of the flag image
-  altText?: string; // Alt text for the image (accessibility)
+  countryName: string;
+  flagsBaseUrl?: string; 
+  width?: number | string;
+  height?: number | string; 
+  altText?: string;
   className?: string; // Additional CSS class names
   style?: React.CSSProperties; // Custom styles applied directly to the flag
   styleOverride?: React.CSSProperties; // Full style object override

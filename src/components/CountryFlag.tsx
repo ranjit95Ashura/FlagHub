@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { getCountryIso2ByName } from "../utils/countryLookup"; // Assuming utility function to get iso2
+import { getCountryIso2ByName } from "../utils/countryLookup";
 import { CountryFlagProps } from "../types/CountryFlagProps";
 import LoadingSpinner from "./LoadingSpinner";
 
 export const CountryFlag: React.FC<CountryFlagProps> = ({
     countryName,
-    flagsBaseUrl = "https://default-flags.com", // Default base URL
+    flagsBaseUrl = "https://default-flags.com",
     width = 30,
     height = "auto",
     altText,
@@ -22,7 +22,7 @@ export const CountryFlag: React.FC<CountryFlagProps> = ({
     backupUrls = [],
     preferLocalStorage = true,
     iconMode = false,
-    countryStyle, // This is now correctly used
+    countryStyle,
     multiSelectMode = false,
     groupFlagsByRegion = null,
     onLoad,
@@ -33,11 +33,30 @@ export const CountryFlag: React.FC<CountryFlagProps> = ({
     dropdownOptions = [],
 }) => {
     const [flagUrl, setFlagUrl] = useState<string | null>(null);
-    const [countryData, setCountryData] = useState<any>(null); // For extra details (e.g., capital, population)
-    const [flagLoaded, setFlagLoaded] = useState(false); // Flag loading state
-    const iso2 = getCountryIso2ByName(countryName);
+    const [countryData, setCountryData] = useState<any>(null);
+    const [flagLoaded, setFlagLoaded] = useState(false);
+    const [iso2, setIso2] = useState<string | null>(null); // Store iso2 in state
 
-    // Fetch the flag URL and country details
+    useEffect(() => {
+        const calculatedIso2 = getCountryIso2ByName(countryName);
+        setIso2(calculatedIso2); // Update iso2 when countryName changes
+    }, [countryName]); // Recalculate iso2 on countryName change
+
+    useEffect(() => {
+        if (iso2) {
+            checkLocalStorage();
+        }
+    }, [iso2, preferLocalStorage]);
+
+    const checkLocalStorage = () => {
+        const storedFlagUrl = iso2 && localStorage.getItem(iso2);
+        if (preferLocalStorage && storedFlagUrl) {
+            setFlagUrl(storedFlagUrl);
+        } else {
+            fetchFlagUrl();
+        }
+    };
+
     const fetchFlagUrl = async () => {
         if (!iso2) return;
 
@@ -47,39 +66,19 @@ export const CountryFlag: React.FC<CountryFlagProps> = ({
             );
             const data = await response.json();
             setFlagUrl(data.secureUrl);
-            setCountryData(data.countryDetails || null); // Assuming countryDetails are part of the response
+            setCountryData(data.countryDetails || null);
             setFlagLoaded(true);
-            onLoad?.(); // Call onLoad callback if provided
+            onLoad?.();
         } catch (error) {
             console.error("Error fetching flag:", error);
-            onError?.(); // Call onError callback if provided
-            handleFallback(); // Fallback to backup URLs
+            onError?.();
+            handleFallback();
         }
     };
 
-    const checkLocalStorage = () => {
-        const storedFlagUrl = iso2 && localStorage.getItem(iso2);
-        if (preferLocalStorage && storedFlagUrl) {
-            setFlagUrl(storedFlagUrl); // Only set if there is a valid string in localStorage
-        } else {
-            fetchFlagUrl(); // Fetch the flag if it's not in localStorage or not preferred
-        }
-    };
-
-    useEffect(() => {
-        if (iso2) {
-            checkLocalStorage();
-        }
-    }, [iso2, preferLocalStorage]);
-
-    if (!flagLoaded) {
-        return <LoadingSpinner />; // Display a loading spinner while flag is being fetched
-      }
-      
-
-    // Handle fallback to backup URLs if the fetch fails
     const handleFallback = async () => {
-        for (let url of backupUrls) {
+        for (const url of backupUrls) {
+            // Use const for loop variable
             try {
                 const response = await fetch(`${url}/api/getFlag?country=${iso2}`);
                 const data = await response.json();
@@ -87,12 +86,16 @@ export const CountryFlag: React.FC<CountryFlagProps> = ({
                 setFlagLoaded(true);
                 return;
             } catch (error) {
-                continue; // Try the next URL in the list
+                console.error(`Error fetching flag from ${url}:`, error); // Include URL in error message
+                continue;
             }
+        }
+        if (!flagLoaded && onError) {
+            //Call onError if all backup urls have failed
+            onError();
         }
     };
 
-    // Handle hover effect
     const handleHover = (e: React.MouseEvent) => {
         const target = e.currentTarget as HTMLElement;
         if (hoverEffect === "zoom") target.style.transform = "scale(1.1)";
@@ -107,67 +110,17 @@ export const CountryFlag: React.FC<CountryFlagProps> = ({
         target.style.animation = "none";
     };
 
-    // Handle multiSelectMode: rendering multiple flags
-    const handleMultiSelectFlags = () => {
-        if (multiSelectMode && Array.isArray(countryName)) {
-            return countryName.map((country) => (
-                <CountryFlag
-                    key={country}
-                    countryName={country}
-                    {...{
-                        showCountryName,
-                        width,
-                        height,
-                        showFlagWithDetails,
-                        iconMode,
-                        borderStyle,
-                        borderRadius,
-                        boxShadow,
-                        styleOverride,
-                    }}
-                />
-            ));
-        }
-        return null;
-    };
-
-    // Render dropdown options if required
-    const renderDropdown = () => {
-        if (isDropdown) {
-            return (
-                <select>
-                    {dropdownOptions.map((option) => (
-                        <option key={option} value={option}>
-                            {option}
-                        </option>
-                    ))}
-                </select>
-            );
-        }
-        return null;
-    };
-
-    // Render Tooltip
-    const renderTooltip = () => {
-        if (showTooltip && tooltipContent) {
-            return <div className="tooltip">{tooltipContent(countryName)}</div>;
-        }
-        return null;
-    };
-
-    // Dynamic styles for flag when iconMode is enabled
     const flagStyle = {
-        width: iconMode ? 20 : width, // Smaller size when iconMode is true
+        width: iconMode ? 20 : width,
         height: iconMode ? 20 : height,
         borderStyle,
         borderRadius,
         boxShadow,
         ...style,
         ...styleOverride,
-        ...countryStyle?.(countryName), // Apply country-specific styles
+        ...countryStyle?.(countryName),
     };
 
-    // Flag render with animation if needed
     const flagWithAnimation = animateOnLoad ? (
         <img
             src={flagUrl || ""}
@@ -191,36 +144,31 @@ export const CountryFlag: React.FC<CountryFlagProps> = ({
         />
     );
 
-    // Group flags by region if groupFlagsByRegion is provided
-    const renderGroupedFlags = () => {
-        if (groupFlagsByRegion) {
-            return Object.keys(groupFlagsByRegion).map((region) => (
-                <div key={region}>
-                    <h3>{region}</h3>
-                    <div>
-                        {groupFlagsByRegion &&
-                            region &&
-                            groupFlagsByRegion[region]?.map((country) => (
-                                <CountryFlag
-                                    key={country}
-                                    countryName={country}
-                                    {...{
-                                        showCountryName,
-                                        width,
-                                        height,
-                                        showFlagWithDetails,
-                                        iconMode,
-                                        borderStyle,
-                                        borderRadius,
-                                        boxShadow,
-                                        styleOverride,
-                                        region,
-                                    }}
-                                />
-                            ))}
-                    </div>
-                </div>
-            ));
+    if (!flagLoaded) {
+        return <LoadingSpinner />;
+    }
+
+    //MultiSelect and Grouped Flags Optimization: Moved logic to parent component
+    if (multiSelectMode || groupFlagsByRegion) return null; // Component renders nothing when in these modes
+
+    const renderTooltip = () => {
+        if (showTooltip && tooltipContent) {
+            return <div className="tooltip">{tooltipContent(countryName)}</div>;
+        }
+        return null;
+    };
+
+    const renderDropdown = () => {
+        if (isDropdown) {
+            return (
+                <select>
+                    {dropdownOptions.map((option) => (
+                        <option key={option} value={option}>
+                            {option}
+                        </option>
+                    ))}
+                </select>
+            );
         }
         return null;
     };
@@ -233,8 +181,6 @@ export const CountryFlag: React.FC<CountryFlagProps> = ({
             onMouseLeave={handleHoverEnd}
         >
             {renderTooltip()}
-            {handleMultiSelectFlags()}
-            {renderGroupedFlags()}
             {showFlagWithDetails ? (
                 <div>
                     {flagWithAnimation}
