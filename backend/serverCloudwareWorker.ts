@@ -33,7 +33,8 @@ const createJsonResponse = (data: object, statusCode: number): Response => {
 // ✅ **Rate Limiting with Cloudflare KV**
 const isRateLimited = async (req: Request, env: Env): Promise<boolean> => {
     const ip = req.headers.get("CF-Connecting-IP") || "unknown";
-    const key = `${RATE_LIMIT_KEY_PREFIX}${ip}`;
+    const ua = req.headers.get("User-Agent") || "unknown";
+    const key = `${RATE_LIMIT_KEY_PREFIX}${ip}_${ua}`;
 
     let requestCount = await env.FLAG_CACHE.get(key);
     let count = requestCount ? parseInt(requestCount) : 0;
@@ -74,16 +75,20 @@ const fetchFromCloudinary = async (
     cloudinaryUrl.searchParams.set("api_key", env.CLOUDINARY_API_KEY);
     cloudinaryUrl.searchParams.set("timestamp", expiresAt.toString());
 
-    // Generate SHA-256 signature
+    // ✅ Generate SHA-256 signature correctly (Hexadecimal conversion)
     const stringToSign = `timestamp=${expiresAt}${env.CLOUDINARY_API_SECRET}`;
-    const signature = await crypto.subtle.digest(
+    const signatureBuffer = await crypto.subtle.digest(
         "SHA-256",
         new TextEncoder().encode(stringToSign)
     );
-    cloudinaryUrl.searchParams.set(
-        "signature",
-        btoa(String.fromCharCode(...new Uint8Array(signature)))
-    );
+
+    // Convert signature buffer to hex string
+    const hashArray = Array.from(new Uint8Array(signatureBuffer));
+    const signatureHex = hashArray
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+
+    cloudinaryUrl.searchParams.set("signature", signatureHex);
 
     return cloudinaryUrl.toString();
 };
@@ -95,6 +100,10 @@ const fetchAndCacheFlag = async (
 ): Promise<string> => {
     try {
         const secureUrl = await fetchFromCloudinary(country, env);
+
+        if (!secureUrl) {
+            return "";
+        }
 
         // Store URL in KV with TTL
         await env.FLAG_CACHE.put(`flag_${country}`, secureUrl, {
@@ -133,18 +142,35 @@ const handleGetFlag = async (req: Request, env: Env): Promise<Response> => {
     // **Check Cloudflare KV Cache**
     const cachedUrl = await env.FLAG_CACHE.get(cacheKey);
     if (cachedUrl) {
-        fetchAndCacheFlag(country, env).catch(console.error); // Background refresh
+        (async () => {
+            const refreshedUrl = await fetchAndCacheFlag(country, env).catch(
+                console.error
+            );
+            if (refreshedUrl) {
+                await env.FLAG_CACHE.put(cacheKey, refreshedUrl, {
+                    expirationTtl: TTL_SECONDS,
+                });
+            }
+        })();
         return createJsonResponse({ success: true, secureUrl: cachedUrl }, 200);
     }
 
     // **Fetch from Cloudinary If Not Found in KV**
-    const secureUrl = await fetchAndCacheFlag(country, env);
-    if (secureUrl === "") {
+    try {
+        const secureUrl = await fetchAndCacheFlag(country, env);
+
+        if (!secureUrl) {
+            return createJsonResponse(
+                { success: false, message: "Cloudinary fetch error" },
+                500
+            );
+        }
+
+        return createJsonResponse({ success: true, secureUrl }, 200);
+    } catch (error) {
         return createJsonResponse(
-            { success: false, message: "Failed to fetch flag" },
+            { success: false, message: (error as Error).message },
             500
         );
     }
-
-    return createJsonResponse({ success: true, secureUrl }, 200);
 };
