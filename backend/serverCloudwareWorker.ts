@@ -83,8 +83,7 @@ const fetchFromCloudinary = async (
     );
 
     // Convert signature buffer to hex string
-    const hashArray = Array.from(new Uint8Array(signatureBuffer));
-    const signatureHex = hashArray
+    const signatureHex = [...new Uint8Array(signatureBuffer)]
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("");
 
@@ -140,7 +139,10 @@ const handleGetFlag = async (req: Request, env: Env): Promise<Response> => {
     const cacheKey = `flag_${country}`;
 
     // **Check Cloudflare KV Cache**
-    const cachedUrl = await env.FLAG_CACHE.get(cacheKey);
+    const cachedUrl = await env.FLAG_CACHE.get(cacheKey, {
+        cacheTtl: TTL_SECONDS,
+    });
+
     if (cachedUrl) {
         (async () => {
             const refreshedUrl = await fetchAndCacheFlag(country, env).catch(
