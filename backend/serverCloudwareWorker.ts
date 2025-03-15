@@ -22,7 +22,6 @@ export default {
     },
 };
 
-// ✅ **Helper Function for Consistent Response Handling**
 const createJsonResponse = (data: object, statusCode: number): Response => {
     return new Response(JSON.stringify(data), {
         status: statusCode,
@@ -30,7 +29,6 @@ const createJsonResponse = (data: object, statusCode: number): Response => {
     });
 };
 
-// ✅ **Rate Limiting with Cloudflare KV**
 const isRateLimited = async (req: Request, env: Env): Promise<boolean> => {
     const ip = req.headers.get("CF-Connecting-IP") || "unknown";
     const ua = req.headers.get("User-Agent") || "unknown";
@@ -50,7 +48,6 @@ const isRateLimited = async (req: Request, env: Env): Promise<boolean> => {
     return false;
 };
 
-// ✅ **Validate Query Parameters (Stricter Validation)**
 const validateQueryParams = (url: URL): string | null => {
     const country = url.searchParams.get("country")?.toUpperCase();
     if (!country || !/^[A-Z]{2}$/.test(country)) {
@@ -59,52 +56,62 @@ const validateQueryParams = (url: URL): string | null => {
     return null;
 };
 
-// ✅ **Fetch Signed URL from Cloudinary**
-const fetchFromCloudinary = async (
+const generateCloudinarySignature = async (
+    params: Record<string, string>,
+    env: Env
+): Promise<string> => {
+    const sortedParams = Object.keys(params)
+        .sort()
+        .map((key) => `${key}=${params[key]}`)
+        .join("&");
+
+    const stringToSign = `${sortedParams}${env.CLOUDINARY_API_SECRET}`;
+    const signatureBuffer = await crypto.subtle.digest(
+        "SHA-1",
+        new TextEncoder().encode(stringToSign)
+    );
+
+    return [...new Uint8Array(signatureBuffer)]
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+};
+
+const fetchSignedCloudinaryUrl = async (
     country: string,
     env: Env
 ): Promise<string> => {
     const filePath = `flags/${country}.svg`;
     const expiresAt = Math.floor(Date.now() / 1000) + TTL_SECONDS;
 
-    // Construct signed Cloudinary URL
+    const params = {
+        timestamp: expiresAt.toString(),
+        public_id: filePath,
+    };
+
+    const signature = await generateCloudinarySignature(params, env);
+
     const cloudinaryUrl = new URL(
         `https://res.cloudinary.com/${env.CLOUDINARY_CLOUD_NAME}/image/upload/${filePath}`
     );
 
     cloudinaryUrl.searchParams.set("api_key", env.CLOUDINARY_API_KEY);
-    cloudinaryUrl.searchParams.set("timestamp", expiresAt.toString());
-
-    // ✅ Generate SHA-256 signature correctly (Hexadecimal conversion)
-    const stringToSign = `timestamp=${expiresAt}${env.CLOUDINARY_API_SECRET}`;
-    const signatureBuffer = await crypto.subtle.digest(
-        "SHA-256",
-        new TextEncoder().encode(stringToSign)
-    );
-
-    // Convert signature buffer to hex string
-    const signatureHex = [...new Uint8Array(signatureBuffer)]
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
-
-    cloudinaryUrl.searchParams.set("signature", signatureHex);
+    cloudinaryUrl.searchParams.set("timestamp", params.timestamp);
+    cloudinaryUrl.searchParams.set("signature", signature);
 
     return cloudinaryUrl.toString();
 };
 
-// ✅ **Fetch & Cache Flag (With Cloudflare KV)**
 const fetchAndCacheFlag = async (
     country: string,
     env: Env
 ): Promise<string> => {
     try {
-        const secureUrl = await fetchFromCloudinary(country, env);
+        const secureUrl = await fetchSignedCloudinaryUrl(country, env);
 
         if (!secureUrl) {
             return "";
         }
 
-        // Store URL in KV with TTL
         await env.FLAG_CACHE.put(`flag_${country}`, secureUrl, {
             expirationTtl: TTL_SECONDS,
         });
@@ -112,16 +119,13 @@ const fetchAndCacheFlag = async (
         return secureUrl;
     } catch (error) {
         console.error(`Error fetching flag for ${country}: ${error}`);
-        // Log error but return just the URL instead of error response here
         return "";
     }
 };
 
-// ✅ **Handle API Request for Flags**
 const handleGetFlag = async (req: Request, env: Env): Promise<Response> => {
     const url = new URL(req.url);
 
-    // **Rate Limiting**
     if (await isRateLimited(req, env)) {
         return createJsonResponse(
             { success: false, message: "Rate limit exceeded." },
@@ -129,7 +133,6 @@ const handleGetFlag = async (req: Request, env: Env): Promise<Response> => {
         );
     }
 
-    // **Validate Country Query Param**
     const errorMessage = validateQueryParams(url);
     if (errorMessage) {
         return createJsonResponse({ success: false, message: errorMessage }, 400);
@@ -138,26 +141,22 @@ const handleGetFlag = async (req: Request, env: Env): Promise<Response> => {
     const country = url.searchParams.get("country")!.toUpperCase();
     const cacheKey = `flag_${country}`;
 
-    // **Check Cloudflare KV Cache**
-    const cachedUrl = await env.FLAG_CACHE.get(cacheKey, {
-        cacheTtl: TTL_SECONDS,
-    });
+    const cachedUrl = await env.FLAG_CACHE.get(cacheKey);
 
     if (cachedUrl) {
-        (async () => {
-            const refreshedUrl = await fetchAndCacheFlag(country, env).catch(
-                console.error
-            );
-            if (refreshedUrl) {
-                await env.FLAG_CACHE.put(cacheKey, refreshedUrl, {
-                    expirationTtl: TTL_SECONDS,
-                });
-            }
-        })();
+        fetchAndCacheFlag(country, env)
+            .then((refreshedUrl) => {
+                if (refreshedUrl) {
+                    env.FLAG_CACHE.put(cacheKey, refreshedUrl, {
+                        expirationTtl: TTL_SECONDS,
+                    }).catch(console.error);
+                }
+            })
+            .catch(console.error);
+
         return createJsonResponse({ success: true, secureUrl: cachedUrl }, 200);
     }
 
-    // **Fetch from Cloudinary If Not Found in KV**
     try {
         const secureUrl = await fetchAndCacheFlag(country, env);
 

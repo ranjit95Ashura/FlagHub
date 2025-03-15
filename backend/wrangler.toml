@@ -1,13 +1,11 @@
 name = "cloudflare-worker"
-type = "javascript"
-account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+account_id = "043c7e1ef0cd2d81046911bc6904faa1"
 workers_dev = true
-
-[vars]
-CLOUDINARY_CLOUD_NAME = "your-cloudinary-name"
-CLOUDINARY_API_KEY = "your-api-key"
-CLOUDINARY_API_SECRET = "your-api-secret"
+compatibility_date = "2024-03-15"
 
 [[kv_namespaces]]
 binding = "FLAG_CACHE"
-id = "your-kv-namespace-id"
+id = "7de62555484f4df7aa9e7d8148f91fd7"
+
+# Add this line to specify the entry-point file
+main = "serverCloudwareWorker.ts"

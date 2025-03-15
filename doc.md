@@ -136,3 +136,11 @@ window.getFlagUrl = getFlagUrl;
 ---
 
 Would you like help setting up a **monorepo (Nx/Turbo) to manage all versions easily?** 🚀
+
+
+<!-- run at runtime:
+
+wrangler secret put CLOUDINARY_CLOUD_NAME
+wrangler secret put CLOUDINARY_API_KEY
+wrangler secret put CLOUDINARY_API_SECRET
+ -->
