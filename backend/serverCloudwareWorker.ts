@@ -4,7 +4,6 @@ export interface Env {
     CLOUDINARY_API_KEY: string;
     CLOUDINARY_API_SECRET: string;
 }
-
 const TTL_SECONDS = 12 * 60 * 60; // 12 hours cache expiration
 const RATE_LIMIT_KEY_PREFIX = "rl_";
 const RATE_LIMIT_MAX = 100; // Max requests per 15 minutes
@@ -12,6 +11,17 @@ const RATE_LIMIT_WINDOW_SEC = 900; // 15 minutes
 
 export default {
     async fetch(req: Request, env: Env): Promise<Response> {
+        if (req.method === "OPTIONS") {
+            return new Response(null, {
+                status: 204,
+                headers: {
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                },
+            });
+        }
+
         const url = new URL(req.url);
 
         if (url.pathname === "/api/getFlag") {
@@ -25,7 +35,12 @@ export default {
 const createJsonResponse = (data: object, statusCode: number): Response => {
     return new Response(JSON.stringify(data), {
         status: statusCode,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*", // 🔹 Allow requests from any origin
+            "Access-Control-Allow-Methods": "GET, OPTIONS", // 🔹 Allow GET and OPTIONS requests
+            "Access-Control-Allow-Headers": "Content-Type", // 🔹 Allow Content-Type header
+        },
     });
 };
 
@@ -60,26 +75,37 @@ const generateCloudinarySignature = async (
     params: Record<string, string>,
     env: Env
 ): Promise<string> => {
-    const sortedParams = Object.keys(params)
+    const queryString = Object.keys(params)
         .sort()
         .map((key) => `${key}=${params[key]}`)
         .join("&");
 
-    const stringToSign = `${sortedParams}${env.CLOUDINARY_API_SECRET}`;
-    const signatureBuffer = await crypto.subtle.digest(
-        "SHA-1",
-        new TextEncoder().encode(stringToSign)
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+        "raw",
+        encoder.encode(env.CLOUDINARY_API_SECRET),
+        { name: "HMAC", hash: "SHA-1" },
+        false,
+        ["sign"]
     );
 
-    return [...new Uint8Array(signatureBuffer)]
-        .map((b) => b.toString(16).padStart(2, "0"))
+    const signatureBuffer = await crypto.subtle.sign(
+        "HMAC",
+        key,
+        encoder.encode(queryString)
+    );
+    const signatureArray = Array.from(new Uint8Array(signatureBuffer));
+    const signatureHex = signatureArray
+        .map((byte) => byte.toString(16).padStart(2, "0"))
         .join("");
+
+    return signatureHex;
 };
 
 const fetchSignedCloudinaryUrl = async (
     country: string,
     env: Env
-): Promise<string> => {
+): Promise<string | null> => {
     const filePath = `flags/${country}.svg`;
     const expiresAt = Math.floor(Date.now() / 1000) + TTL_SECONDS;
 
@@ -97,6 +123,15 @@ const fetchSignedCloudinaryUrl = async (
     cloudinaryUrl.searchParams.set("api_key", env.CLOUDINARY_API_KEY);
     cloudinaryUrl.searchParams.set("timestamp", params.timestamp);
     cloudinaryUrl.searchParams.set("signature", signature);
+
+    const response = await fetch(cloudinaryUrl.toString(), {
+        headers: { "Content-Type": "image/svg+xml" },
+    });
+
+    if (!response.ok) {
+        console.error(`Flag not found on Cloudinary: ${filePath}`);
+        return null;
+    }
 
     return cloudinaryUrl.toString();
 };
