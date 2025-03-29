@@ -4,6 +4,7 @@ export interface Env {
     CLOUDINARY_API_KEY: string;
     CLOUDINARY_API_SECRET: string;
 }
+
 const TTL_SECONDS = 12 * 60 * 60; // 12 hours cache expiration
 const RATE_LIMIT_KEY_PREFIX = "rl_";
 const RATE_LIMIT_MAX = 100; // Max requests per 15 minutes
@@ -23,7 +24,6 @@ export default {
         }
 
         const url = new URL(req.url);
-
         if (url.pathname === "/api/getFlag") {
             return await handleGetFlag(req, env);
         }
@@ -37,18 +37,21 @@ const createJsonResponse = (data: object, statusCode: number): Response => {
         status: statusCode,
         headers: {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*", // 🔹 Allow requests from any origin
-            "Access-Control-Allow-Methods": "GET, OPTIONS", // 🔹 Allow GET and OPTIONS requests
-            "Access-Control-Allow-Headers": "Content-Type", // 🔹 Allow Content-Type header
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
         },
     });
 };
 
-const isRateLimited = async (req: Request, env: Env): Promise<boolean> => {
-    const ip = req.headers.get("CF-Connecting-IP") || "unknown";
-    const ua = req.headers.get("User-Agent") || "unknown";
-    const key = `${RATE_LIMIT_KEY_PREFIX}${ip}_${ua}`;
+const getRateLimitKey = (req: Request): string => {
+    const ip = req.headers.get("CF-Connecting-IP") || "unknown_ip";
+    const ua = req.headers.get("User-Agent") || "unknown_ua";
+    return `${RATE_LIMIT_KEY_PREFIX}${ip}_${ua}`;
+};
 
+const isRateLimited = async (req: Request, env: Env): Promise<boolean> => {
+    const key = getRateLimitKey(req);
     let requestCount = await env.FLAG_CACHE.get(key);
     let count = requestCount ? parseInt(requestCount) : 0;
 
@@ -142,10 +145,7 @@ const fetchAndCacheFlag = async (
 ): Promise<string> => {
     try {
         const secureUrl = await fetchSignedCloudinaryUrl(country, env);
-
-        if (!secureUrl) {
-            return "";
-        }
+        if (!secureUrl) return "";
 
         await env.FLAG_CACHE.put(`flag_${country}`, secureUrl, {
             expirationTtl: TTL_SECONDS,
@@ -176,25 +176,14 @@ const handleGetFlag = async (req: Request, env: Env): Promise<Response> => {
     const country = url.searchParams.get("country")!.toUpperCase();
     const cacheKey = `flag_${country}`;
 
+    // Check cache
     const cachedUrl = await env.FLAG_CACHE.get(cacheKey);
-
     if (cachedUrl) {
-        fetchAndCacheFlag(country, env)
-            .then((refreshedUrl) => {
-                if (refreshedUrl) {
-                    env.FLAG_CACHE.put(cacheKey, refreshedUrl, {
-                        expirationTtl: TTL_SECONDS,
-                    }).catch(console.error);
-                }
-            })
-            .catch(console.error);
-
         return createJsonResponse({ success: true, secureUrl: cachedUrl }, 200);
     }
 
     try {
         const secureUrl = await fetchAndCacheFlag(country, env);
-
         if (!secureUrl) {
             return createJsonResponse(
                 { success: false, message: "Cloudinary fetch error" },

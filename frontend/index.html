@@ -4,6 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Frontend</title>
+    <style>
+        #loader {
+            font-size: 18px;
+            font-weight: bold;
+            color: blue;
+            display: block;
+        }
+        #flag {
+            display: none;
+        }
+    </style>
 </head>
 
 <body>
@@ -11,21 +22,37 @@
     <p>This is the frontend of the application.</p>
     <p>It is served by the frontend service.</p>
 
+    <!-- Loader -->
+    <div id="loader">Loading...</div>
+
+    <!-- Flag Image -->
     <img id="flag" src="" alt="Country Flag" width="200">
     <img src="./power-svgrepo-com.svg" alt="power-svgrepo-com" width="100" height="100">
 
     <script>
         async function fetchFlag() {
+            const loader = document.getElementById("loader");
+            const flag = document.getElementById("flag");
+
             try {
+                // Show loader before API call
+                loader.style.display = "block";
+                flag.style.display = "none";
+
                 const response = await fetch("https://cloudflare-worker.ranjitsuryawanshi952.workers.dev/api/getFlag?country=AC");
                 const data = await response.json();
+
                 if (data.success) {
-                    document.getElementById("flag").src = data.secureUrl;
+                    flag.src = data.secureUrl;
+                    flag.style.display = "block"; // Show flag when loaded
                 } else {
                     console.error("Failed to fetch flag");
                 }
             } catch (error) {
                 console.error("Error fetching flag:", error);
+            } finally {
+                // Hide loader after API call (whether success or failure)
+                loader.style.display = "none";
             }
         }
         
